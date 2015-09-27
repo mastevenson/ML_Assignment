@@ -1,0 +1,161 @@
+---
+title: "Practical Machine Learning - Human Activity Recognition"
+author: "Mark Stevenson"
+date: "September 26, 2015"
+output: html_document
+---
+
+## *Assignment Information (from Coursera for Reference):*
+
+#### *Background:*
+*Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).*
+
+#### *Data:*
+1. *The training data for this project are available here: [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv]*
+2. *The test data are available here: [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv]*
+3. *The data for this project come from this source: [http://groupware.les.inf.puc-rio.br/har]. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.*
+
+#### *What you should submit:*
+*The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.*
+
+1. *Your submission should consist of a link to a Github repo with your R markdown and compiled HTML file describing your analysis. Please constrain the text of the writeup to < 2000 words and the number of figures to be less than 5. It will make it easier for the graders if you submit a repo with a gh-pages branch so the HTML page can be viewed online (and you always want to make it easy on graders :-).*
+
+2. *You should also apply your machine learning algorithm to the 20 test cases available in the test data above. Please submit your predictions in appropriate format to the programming assignment for automated grading. See the programming assignment for additional details.*
+
+## Student Solution/Analysis and Response:
+
+#### Initial Approach:
+
+1. Read reference material, acquire, and explore data.
+2. Perform preparation for round of cross validation by subsetting 60% of training data to a training subset and the remaining 40% to a testing subset. Perform data cleansing/preparation on both sets to ensure equivalence. 
+3. Develop models and estimate out of sample error rate. A reasonable expectation for out of sample error is expected to be 100% minus the accuracy of the trained model. This would further be substantiated by reviewing the model accuracy on application to the cross-validation test set.    
+4. Acquire and prepare Coursera test data, and apply model to upload results 
+
+#### Loading Required Libraries:
+```{r}
+library(caret)
+library(ggplot2)
+library(randomForest)
+set.seed(333) #to ensure this can be reproduced
+```
+
+#### Data Acquisition:
+
+```{r}
+URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"; 
+temp <- tempfile(); download.file(URL,temp)
+train<- read.csv(temp, na.strings = c('','NA','#DIV/0!'))
+```
+
+#### Exploratory Data Analysis:
+
+The author has reviewed the structure of the training data set by reading reference information in the Background section above. We are to predict the value of the 'classe' variable which represents five different exercise fashions of the Unilateral Dumbbell Biceps Curl. Per the reference information provided we understand the 'classe' values are:
+
+Value | Description
+------------- | -------------
+A | Exactly according to the specification
+B | Throwing the elbows to the front
+C | Lifting the dumbbell only halfway
+D | Lowering the dumbbell only halfway
+E | Throwing the hips to the front
+
+Let's develop an understanding of the frequency of each of the fashions in the training set by performing a histogram:
+```{r}
+qplot(train$classe, geom="histogram", fill=train$classe)
+```
+
+Let's now review  the data via the following commands (not printed to save space):
+```{r, eval=FALSE}
+utils::View(train)
+summary(train)
+```
+
+#### Data Preparation:
+
+**Author's Observations and Rationale for Data Preparation Choices from Exploratory Analysis:**
+
+1. Let's initially remove the 'ID' column as this variable would lead to linearity and throw off our algorithm.
+2. Let's remove the user name and other administrative fields in the remaining six columns
+3. There are lots of columns with NA's and they are sparse so we will remove them
+
+```{r}
+na_count <- data.frame(lapply(train, function(y) sum(length(which(is.na(y))))))
+NA_cols <-names(which(apply(na_count>0, 2, any)))
+new_train <- train[,!names(train) %in% NA_cols] 
+new_train<-new_train[complete.cases(new_train),]
+new_train<-new_train[,-1:-7]
+```
+
+As we haven't performed any numerical calculations (only column wise operations) we can break out our cross validation train and test sets:
+
+```{r}
+train_flag <- createDataPartition(y=new_train$classe, p=0.6, list=FALSE)
+final_train <- new_train[train_flag, ]
+cross_validation_test <- new_train[-train_flag, ]
+```
+
+#### Prediction:
+
+**Authors rationale for building initial model:** As we're somewhat limited by space in this analysis we'll use all available variables to build the best 'general' model we can. First we'll try Linear Discriminant Analysis:
+
+```{r}
+model_LDA <- train(classe ~. , data=final_train, method='lda')
+model_LDA
+
+LDA_predictions <- predict(model_LDA, cross_validation_test, type="raw")
+confusionMatrix(data=LDA_predictions, cross_validation_test$classe)
+```
+
+Immediately reviewing the accuracy of the model we see it is low at 69% and the test/out of sample set is nearly equal (~69%). The Author's hypothesis is that the low performance is attributable to the assumptions for the distributions of variables for each class.
+
+**Author's rationale for building secondary model:** Let's attempt to make a better model. For our second model we will use Random Forests. Random forests are selected as they exhibit the following characteristics:
+
+1. They are an all-purpose model performing well on most problems
+2. The approach inherently performs feature selection. This is advantageous as we are providing all available variables. 
+3. Handles large amounts of data well and does not have a lengthy processing time in the Author's experience
+
+```{r}
+model_rf <- randomForest(classe ~. , data=final_train)
+model_rf
+```
+
+**Author's Expectation of out of sample error:** Reviewing the model above we see the OOB (out-of-bag) error estimate is .7% (that is less than 1%). From our lectures we know the OOB estimate for the generalization error is the error rate for the out-of-bag passes on the training set *(see 'Out-of-Bag Estimation', Leo Breiman, 1996)*. Thus we may reasonably conclude that our out of sample error will be near 1% (equivalently our accuracy will be 99%).
+
+```{r}
+rf_predictions <- predict(model_rf, cross_validation_test, type = "class")
+confusionMatrix(rf_predictions, cross_validation_test$classe)
+```
+
+Applying to the CV test set we see results are better and at 99% accuracy. This further supports the author's view that the model will generalize well on more out of sample data.
+
+#### Applying Prediction to Testing Data:
+
+From our discussion above we see the better model is the Random Forest.
+
+Let's acquire our Coursera 20 test set data and prepare according to the data preparation steps performed above.
+
+Then we'll apply our random forest model to the Coursera testing data set and output the results via the function provided in the Coursera site. These will be uploaded for the second assignment.
+
+```{r}
+URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"; temp <- tempfile(); download.file(URL,temp)
+test<- read.csv(temp,na.strings = c('','NA','#DIV/0!'))
+
+coursera_test <- test[,!names(test) %in% NA_cols]
+coursera_test <- coursera_test[complete.cases(coursera_test),]
+coursera_test <- coursera_test[,-1:-7]
+
+coursera_test_predictions <- predict(model_rf, coursera_test, type="class")
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(coursera_test_predictions)
+```
+
+
+
